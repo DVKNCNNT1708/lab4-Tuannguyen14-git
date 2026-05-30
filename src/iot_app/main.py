@@ -1,3 +1,4 @@
+from http import HTTPStatus
 import os
 from datetime import datetime, timezone
 from enum import Enum
@@ -17,9 +18,7 @@ AUTH_TOKEN = os.getenv("AUTH_TOKEN", "local-dev-token")
 app = FastAPI(
     title="FIT4110 Lab 04 - IoT Ingestion Service",
     version=SERVICE_VERSION,
-    description=(
-        "Dockerized IoT Ingestion API aligned with the Lab 03 OpenAPI/Postman contract."
-    ),
+    description="Dockerized IoT Ingestion API aligned with Lab 03 contract.",
 )
 
 
@@ -52,17 +51,11 @@ class HealthResponse(BaseModel):
 
 
 class SensorReadingCreate(BaseModel):
-    device_id: str = Field(..., min_length=3, examples=["ESP32-LAB-A01"])
-    metric: SensorMetric = Field(..., examples=["temperature"])
-    value: float = Field(
-        ...,
-        ge=-40,
-        le=80,
-        description="Boundary range used in Lab 03 and Lab 04: -40 to 80.",
-        examples=[31.5],
-    )
-    unit: Optional[SensorUnit] = Field(default=None, examples=["celsius"])
-    timestamp: str = Field(..., examples=["2026-05-13T08:30:00+07:00"])
+    device_id: str = Field(..., min_length=3)
+    metric: SensorMetric
+    value: float = Field(..., ge=-40, le=80)
+    unit: Optional[SensorUnit] = None
+    timestamp: str
 
 
 class SensorReading(BaseModel):
@@ -100,8 +93,10 @@ def build_problem(
         "status": status_code,
         "detail": detail,
     }
+
     if instance:
         problem["instance"] = instance
+
     return problem
 
 
@@ -112,13 +107,13 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     else:
         problem = build_problem(
             status_code=exc.status_code,
-            title=status.HTTP_STATUS_CODES.get(exc.status_code, "HTTP Error"),
+            title=HTTPStatus(exc.status_code).phrase,
             detail=str(exc.detail),
             instance=str(request.url.path),
         )
 
     problem.setdefault("status", exc.status_code)
-    problem.setdefault("title", status.HTTP_STATUS_CODES.get(exc.status_code, "HTTP Error"))
+    problem.setdefault("title", HTTPStatus(exc.status_code).phrase)
     problem.setdefault("type", "about:blank")
     problem.setdefault("detail", "Request failed")
     problem.setdefault("instance", str(request.url.path))
@@ -133,7 +128,8 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
-    request: Request, exc: RequestValidationError
+    request: Request,
+    exc: RequestValidationError,
 ) -> JSONResponse:
     first_error = exc.errors()[0] if exc.errors() else {}
     location = ".".join(str(item) for item in first_error.get("loc", []))
@@ -166,6 +162,7 @@ def verify_bearer_token(authorization: Optional[str] = Header(default=None)) -> 
         )
 
     expected = f"Bearer {AUTH_TOKEN}"
+
     if authorization != expected:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -223,6 +220,7 @@ def create_reading(payload: SensorReadingCreate, response: Response) -> SensorRe
         "timestamp": payload.timestamp,
         "created_at": created_at,
     }
+
     READINGS.append(item)
 
     return SensorReadingCreated(
