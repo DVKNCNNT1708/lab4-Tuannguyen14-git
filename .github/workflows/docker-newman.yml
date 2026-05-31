@@ -23,6 +23,22 @@ jobs:
       - name: Lint OpenAPI contract
         run: npm run lint:openapi
 
+      - name: Start Prism mock server
+        run: |
+          npx prism mock contracts/iot-ingestion.openapi.yaml -p 4010 --host 0.0.0.0 &
+          sleep 1
+
+      - name: Wait for mock health
+        run: npx wait-on http://127.0.0.1:4010/health --timeout 60000
+
+      - name: Run Newman against Prism mock
+        run: npm run test:mock
+
+      - name: Stop Prism mock server
+        run: |
+          pkill -f "prism" || true
+          sleep 1
+
       - name: Build Docker image
         run: docker build -t fit4110/iot-ingestion:lab04 .
 
