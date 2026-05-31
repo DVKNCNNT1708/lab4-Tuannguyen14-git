@@ -25,18 +25,35 @@ jobs:
 
       - name: Start Prism mock server
         run: |
-          npx prism mock contracts/iot-ingestion.openapi.yaml -p 4010 --host 0.0.0.0 &
-          sleep 1
+          nohup npx prism mock contracts/iot-ingestion.openapi.yaml -p 4010 --host 0.0.0.0 > prism.log 2>&1 &
+          echo $! > prism.pid
+          echo "Prism PID: $(cat prism.pid)"
+          sleep 5
 
       - name: Wait for mock health
-        run: npx wait-on http://127.0.0.1:4010/health --timeout 60000
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4010/health > /dev/null 2>&1; then
+              echo "✅ Prism mock server is ready!"
+              exit 0
+            fi
+            echo "⏳ Waiting for Prism... attempt $i/30"
+            sleep 2
+          done
+          echo "❌ Prism failed to start. Dumping logs:"
+          cat prism.log || true
+          exit 1
 
       - name: Run Newman against Prism mock
         run: npm run test:mock
 
+      - name: Show Prism logs on failure
+        if: failure()
+        run: cat prism.log || true
+
       - name: Stop Prism mock server
         run: |
-          pkill -f "prism" || true
+          kill $(cat prism.pid) 2>/dev/null || pkill -f "prism" || true
           sleep 1
 
       - name: Build Docker image
@@ -52,7 +69,18 @@ jobs:
             fit4110/iot-ingestion:lab04
 
       - name: Wait for service health
-        run: npx wait-on http://127.0.0.1:8000/health --timeout 60000
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "✅ Docker container is ready!"
+              exit 0
+            fi
+            echo "⏳ Waiting for container... attempt $i/30"
+            sleep 2
+          done
+          echo "❌ Container failed to start. Dumping logs:"
+          docker logs fit4110-iot-lab04 || true
+          exit 1
 
       - name: Run Newman against Docker container
         run: npm run test:local
